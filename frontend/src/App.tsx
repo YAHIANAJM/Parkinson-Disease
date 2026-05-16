@@ -885,11 +885,6 @@ function AnalysisPage({ patients, setSessions }: {
     if (progressRef.current) clearInterval(progressRef.current)
   }
 
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith('audio/')) return
-    reset(); setAudioFile(file); setAudioUrl(URL.createObjectURL(file))
-  }
-
   const handleFiles = (files: FileList | File[]) => {
     if (batchRunning) return
     const valid = Array.from(files).filter(f => f.type.startsWith('audio/'))
