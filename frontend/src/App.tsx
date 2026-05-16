@@ -912,12 +912,8 @@ function AnalysisPage({ patients, setSessions }: {
     for (let i = 0; i < queue.length; i++) {
       if (queue[i].status !== 'pending') continue
       setFileQueue(prev => prev.map((q, idx) => idx === i ? { ...q, status: 'processing' } : q))
-      const fd = new FormData()
-      fd.append('audio', queue[i].file)
-      if (selectedPatient) fd.append('patient_id', selectedPatient)
-      if (DOCTOR_ID)       fd.append('doctor_id',  DOCTOR_ID)
       try {
-        const data = await api.predict(fd)
+        const data = await api.predict(queue[i].file, selectedPatient || undefined, DOCTOR_ID || undefined)
         const res: AnalysisResult = {
           prediction:     data.prediction,
           confidence:     data.confidence,
@@ -979,13 +975,8 @@ function AnalysisPage({ patients, setSessions }: {
       setProgress(prev => prev >= 85 ? 85 : prev + Math.random() * 12)
     }, 400)
 
-    const fd = new FormData()
-    fd.append('audio', source)
-    if (selectedPatient) fd.append('patient_id', selectedPatient)
-    if (DOCTOR_ID)       fd.append('doctor_id',  DOCTOR_ID)
-
     try {
-      const data = await api.predict(fd)
+      const data = await api.predict(source, selectedPatient || undefined, DOCTOR_ID || undefined)
       if (progressRef.current) clearInterval(progressRef.current)
       setProgress(100)
 

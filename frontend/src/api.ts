@@ -234,13 +234,24 @@ export const api = {
   },
 
   // ── ML Predict ──────────────────────────────────────────────────────────────
-  predict: (formData: FormData) =>
-    fetch(`${BASE}/api/predict`, { method: 'POST', body: formData })
-      .then(async res => {
-        if (!res.ok) {
-          const b = await res.json().catch(() => ({}))
-          throw new Error(b.error || `HTTP ${res.status}`)
-        }
-        return res.json() as Promise<PredictResult>
-      }),
+  // Sends audio as raw binary body; patient/doctor IDs go as query params.
+  predict: async (file: File, patientId?: string, doctorId?: string): Promise<PredictResult> => {
+    const url = new URL(`${BASE}/api/predict`)
+    if (patientId) url.searchParams.set('patient_id', patientId)
+    if (doctorId)  url.searchParams.set('doctor_id',  doctorId)
+
+    const res = await fetch(url.toString(), {
+      method:  'POST',
+      headers: {
+        'Content-Type': file.type || 'audio/webm',
+        'X-Filename':   file.name,
+      },
+      body: file,
+    })
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}))
+      throw new Error(b.error || `HTTP ${res.status}`)
+    }
+    return res.json() as Promise<PredictResult>
+  },
 }

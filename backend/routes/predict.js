@@ -1,113 +1,98 @@
 const express  = require('express')
-const multer   = require('multer')
 const path     = require('path')
-const fs       = require('fs')
 const supabase = require('../supabase')
 
 const router = express.Router()
 
-const upload = multer({
-  dest: 'uploads/',
-  limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('audio/')) return cb(null, true)
-    cb(new Error('Only audio files are allowed'))
-  },
-})
-
 // POST /api/predict
-// Body (multipart): audio (file), patient_id (optional), doctor_id (optional)
-// 1. Runs Python ML model on the audio
-// 2. If patient_id + doctor_id are provided, saves the session to Supabase
-// 3. Optionally uploads audio to Supabase Storage
-router.post('/', upload.single('audio'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No audio file provided' })
-  }
+// Body   : raw audio bytes  (Content-Type: audio/*)
+// Headers: X-Filename       (optional original filename)
+// Query  : patient_id, doctor_id  (optional, for Supabase persistence)
+router.post(
+  '/',
+  express.raw({ type: 'audio/*', limit: '50mb' }),
+  async (req, res) => {
+    if (!req.body || !req.body.length) {
+      return res.status(400).json({ error: 'No audio body provided' })
+    }
 
-  const audioPath  = path.resolve(req.file.path)
-  const { patient_id, doctor_id } = req.body
+    const contentType = req.headers['content-type'] || 'audio/webm'
+    const filename    = req.headers['x-filename']    || 'recording.webm'
+    const { patient_id, doctor_id } = req.query
 
-  // ── Step 1: Call FastAPI ML server ───────────────────────────────────────
-  let mlResult
-  try {
-    mlResult = await callFastAPI(audioPath, req.file)
-  } catch (err) {
-    fs.unlink(audioPath, () => {})
-    return res.status(500).json({ error: err.message })
-  }
-
-  // ── Step 2: Upload audio to Supabase Storage (if patient context given) ──
-  let storagePath = null
-  if (patient_id && doctor_id) {
+    // ── Step 1: Forward to FastAPI ML server ────────────────────────────────
+    let mlResult
     try {
-      const ext      = path.extname(req.file.originalname || '.webm') || '.webm'
-      const fileName = `${Date.now()}${ext}`
-      storagePath    = `${doctor_id}/${patient_id}/${fileName}`
+      mlResult = await callFastAPI(req.body, contentType, filename)
+    } catch (err) {
+      return res.status(500).json({ error: err.message })
+    }
 
-      const fileBuffer = fs.readFileSync(audioPath)
-      const { error: storageErr } = await supabase.storage
-        .from('audio-recordings')
-        .upload(storagePath, fileBuffer, { contentType: req.file.mimetype || 'audio/webm' })
+    // ── Step 2: Upload audio to Supabase Storage (non-fatal) ────────────────
+    let storagePath = null
+    if (patient_id && doctor_id) {
+      try {
+        const ext = path.extname(filename) || '.webm'
+        storagePath = `${doctor_id}/${patient_id}/${Date.now()}${ext}`
 
-      if (storageErr) {
-        console.warn('[predict] Storage upload failed:', storageErr.message)
-        storagePath = null  // non-fatal — continue without storage
+        const { error: storageErr } = await supabase.storage
+          .from('audio-recordings')
+          .upload(storagePath, req.body, { contentType })
+
+        if (storageErr) {
+          console.warn('[predict] Storage upload failed:', storageErr.message)
+          storagePath = null
+        }
+      } catch (e) {
+        console.warn('[predict] Storage error:', e.message)
+        storagePath = null
       }
-    } catch (e) {
-      console.warn('[predict] Storage error:', e.message)
-      storagePath = null
     }
-  }
 
-  // ── Step 3: Save session record to Supabase ───────────────────────────────
-  let sessionId = null
-  if (patient_id && doctor_id) {
-    const { data: session, error: sessionErr } = await supabase
-      .from('voice_sessions')
-      .insert({
-        patient_id,
-        doctor_id,
-        audio_path:       storagePath,
-        audio_file_name:  req.file.originalname || 'recording.webm',
-        audio_size_bytes: req.file.size,
-        result:           mlResult.prediction,
-        confidence:       mlResult.confidence,
-        message:          mlResult.message,
-        features:         mlResult.features || null,
-      })
-      .select('id')
-      .single()
+    // ── Step 3: Persist session record to Supabase ───────────────────────────
+    let sessionId = null
+    if (patient_id && doctor_id) {
+      const { data: session, error: sessionErr } = await supabase
+        .from('voice_sessions')
+        .insert({
+          patient_id,
+          doctor_id,
+          audio_path:       storagePath,
+          audio_file_name:  filename,
+          audio_size_bytes: req.body.length,
+          result:           mlResult.prediction,
+          confidence:       mlResult.confidence,
+          message:          mlResult.message,
+          features:         mlResult.features || null,
+        })
+        .select('id')
+        .single()
 
-    if (sessionErr) {
-      console.warn('[predict] Failed to save session:', sessionErr.message)
-    } else {
-      sessionId = session.id
+      if (sessionErr) {
+        console.warn('[predict] Failed to save session:', sessionErr.message)
+      } else {
+        sessionId = session.id
+      }
     }
+
+    res.json({
+      prediction:     mlResult.prediction,
+      confidence:     mlResult.confidence,
+      message:        mlResult.message,
+      voice_model:    mlResult.voice_model    || null,
+      research_model: mlResult.research_model || null,
+      session_id:     sessionId,
+      audio_stored:   !!storagePath,
+    })
   }
+)
 
-  // ── Cleanup temp file ─────────────────────────────────────────────────────
-  fs.unlink(audioPath, () => {})
-
-  res.json({
-    prediction:      mlResult.prediction,
-    confidence:      mlResult.confidence,
-    message:         mlResult.message,
-    voice_model:     mlResult.voice_model     || null,
-    research_model:  mlResult.research_model  || null,
-    session_id:      sessionId,
-    audio_stored:    !!storagePath,
-  })
-})
-
-// ── Utility: forward audio to FastAPI ML server and return parsed result ───────
-async function callFastAPI(audioPath, fileInfo) {
-  const apiUrl = process.env.PYTHON_API_URL || 'http://localhost:8000'
-
-  const fileBuffer = fs.readFileSync(audioPath)
-  const blob       = new Blob([fileBuffer], { type: fileInfo.mimetype || 'audio/webm' })
-  const formData   = new FormData()
-  formData.append('audio', blob, fileInfo.originalname || 'recording.webm')
+// ── Proxy raw audio buffer to FastAPI ML server ───────────────────────────────
+async function callFastAPI(buffer, contentType, filename) {
+  const apiUrl   = process.env.PYTHON_API_URL || 'http://localhost:8000'
+  const blob     = new Blob([buffer], { type: contentType })
+  const formData = new FormData()
+  formData.append('audio', blob, filename)
 
   const res = await fetch(`${apiUrl}/predict`, { method: 'POST', body: formData })
 
