@@ -888,6 +888,127 @@ function PatientsPage({ patients: appPatients, setPatients: setAppPatients }: {
   )
 }
 
+// ── Test Samples Section ──────────────────────────────────────────────────────
+const SAMPLES = [
+  { id: 'h1', label: 'Healthy', kind: 'healthy' as const, src: '/samples/healthy/healthy_1.wav', name: 'Sample HC-1' },
+  { id: 'h2', label: 'Healthy', kind: 'healthy' as const, src: '/samples/healthy/healthy_2.wav', name: 'Sample HC-2' },
+  { id: 'h3', label: 'Healthy', kind: 'healthy' as const, src: '/samples/healthy/healthy_3.wav', name: 'Sample HC-3' },
+  { id: 'h4', label: 'Healthy', kind: 'healthy' as const, src: '/samples/healthy/healthy_4.wav', name: 'Sample HC-4' },
+  { id: 'h5', label: 'Healthy', kind: 'healthy' as const, src: '/samples/healthy/healthy_5.wav', name: 'Sample HC-5' },
+  { id: 'p1', label: "Parkinson's", kind: 'parkinson' as const, src: '/samples/pd/pd_1.wav', name: 'Sample PD-1' },
+  { id: 'p2', label: "Parkinson's", kind: 'parkinson' as const, src: '/samples/pd/pd_2.wav', name: 'Sample PD-2' },
+  { id: 'p3', label: "Parkinson's", kind: 'parkinson' as const, src: '/samples/pd/pd_3.wav', name: 'Sample PD-3' },
+  { id: 'p4', label: "Parkinson's", kind: 'parkinson' as const, src: '/samples/pd/pd_4.wav', name: 'Sample PD-4' },
+  { id: 'p5', label: "Parkinson's", kind: 'parkinson' as const, src: '/samples/pd/pd_5.wav', name: 'Sample PD-5' },
+]
+
+function TestSamplesSection() {
+  const [playing, setPlaying] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const togglePlay = (id: string, src: string) => {
+    if (playing === id) {
+      audioRef.current?.pause()
+      setPlaying(null)
+    } else {
+      if (audioRef.current) audioRef.current.pause()
+      const a = new Audio(src)
+      a.onended = () => setPlaying(null)
+      a.play()
+      audioRef.current = a
+      setPlaying(id)
+    }
+  }
+
+  const download = (src: string, name: string) => {
+    const a = document.createElement('a')
+    a.href = src
+    a.download = `${name}.wav`
+    a.click()
+  }
+
+  const healthy = SAMPLES.filter(s => s.kind === 'healthy')
+  const pd      = SAMPLES.filter(s => s.kind === 'parkinson')
+
+  return (
+    <div className="test-samples-section">
+      <div className="ts-header">
+        <div className="ts-header-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        </div>
+        <div>
+          <h3 className="ts-title">Test Voice Samples</h3>
+          <p className="ts-sub">Real recordings from our dataset — use these to verify the model before uploading your own audio</p>
+        </div>
+      </div>
+
+      <div className="ts-grid">
+        {/* Healthy column */}
+        <div className="ts-col">
+          <div className="ts-col-label healthy">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Healthy Controls
+          </div>
+          {healthy.map(s => (
+            <SampleRow key={s.id} sample={s} isPlaying={playing === s.id}
+              onPlay={() => togglePlay(s.id, s.src)}
+              onDownload={() => download(s.src, s.name)}/>
+          ))}
+        </div>
+
+        {/* PD column */}
+        <div className="ts-col">
+          <div className="ts-col-label parkinson">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Parkinson's Patients
+          </div>
+          {pd.map(s => (
+            <SampleRow key={s.id} sample={s} isPlaying={playing === s.id}
+              onPlay={() => togglePlay(s.id, s.src)}
+              onDownload={() => download(s.src, s.name)}/>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SampleRow({ sample, isPlaying, onPlay, onDownload }: {
+  sample: typeof SAMPLES[0]
+  isPlaying: boolean
+  onPlay: () => void
+  onDownload: () => void
+}) {
+  return (
+    <div className={`sample-row ${sample.kind}`}>
+      <button className={`sample-play ${isPlaying ? 'playing' : ''}`} onClick={onPlay} title={isPlaying ? 'Pause' : 'Play'}>
+        {isPlaying ? (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        ) : (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        )}
+      </button>
+
+      <div className="sample-wave">
+        {Array.from({ length: 18 }).map((_, i) => (
+          <span key={i} className={`sw-bar ${isPlaying ? 'animate' : ''}`}
+            style={{ animationDelay: `${i * 0.06}s`, height: `${6 + Math.sin(i * 1.1) * 5 + Math.random() * 6}px` }}/>
+        ))}
+      </div>
+
+      <span className="sample-name">{sample.name}</span>
+
+      <span className={`sample-badge ${sample.kind}`}>
+        {sample.kind === 'healthy' ? 'HC' : 'PD'}
+      </span>
+
+      <button className="sample-dl" onClick={onDownload} title="Download">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
+    </div>
+  )
+}
+
 // ── Recent Sessions with pagination ───────────────────────────────────────────
 const SESSION_PAGE = 8
 
@@ -1517,6 +1638,9 @@ function AnalysisPage({ patients, setSessions }: {
           </div>
         </div>
       )}
+
+      {/* ── Test Samples ────────────────────────────────────────────────────── */}
+      <TestSamplesSection/>
     </div>
   )
 }
