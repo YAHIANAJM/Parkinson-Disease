@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import './App.css'
 import { api, DOCTOR_ID } from './api'
-import type { Patient as ApiPatient, VoiceSession as ApiSession } from './api'
+import type { Patient as ApiPatient, VoiceSession as ApiSession, DashboardData, Appointment as ApiAppointment } from './api'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Page = 'dashboard' | 'patients' | 'analysis' | 'training' | 'settings'
@@ -272,15 +272,20 @@ function BrainVisualization() {
 }
 
 // ── Sessions Bar Chart ─────────────────────────────────────────────────────────
-function SessionsBarChart() {
-  const chartH = 90
-  const barW = 28
-  const gap = 18
-  const max = Math.max(...CHART_DATA.map(d => d.val))
-  const totalW = CHART_DATA.length * (barW + gap) - gap + 4
+function SessionsBarChart({ data }: { data: Array<{ label: string; val: number }> }) {
+  const VW = 300            // fixed viewBox width — scales proportionally at any card size
+  const VH = 110
+  const barH_max = 70       // max bar height in viewBox units
+  const labelY   = VH - 6
+  const n   = data.length
+  const max = Math.max(...data.map(d => d.val), 1)
+  const barW  = n > 0 ? Math.floor((VW * 0.72) / n) : 40
+  const gap   = n > 1 ? Math.floor((VW * 0.28) / (n - 1)) : 0
+  const totalBarZone = n * barW + (n - 1) * gap
+  const startX = (VW - totalBarZone) / 2
 
   return (
-    <svg viewBox={`0 0 ${totalW} ${chartH + 30}`} className="bar-chart-svg">
+    <svg viewBox={`0 0 ${VW} ${VH}`} className="bar-chart-svg" preserveAspectRatio="xMidYMid meet">
       <defs>
         <linearGradient id="barG" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#3B82F6"/>
@@ -291,18 +296,22 @@ function SessionsBarChart() {
           <stop offset="100%" stopColor="#DBEAFE"/>
         </linearGradient>
       </defs>
-      {CHART_DATA.map((d, i) => {
-        const isLast = i === CHART_DATA.length - 1
-        const barH = Math.max((d.val / max) * chartH, 4)
-        const x = i * (barW + gap)
-        const y = chartH - barH
+      {data.map((d, i) => {
+        const isLast = i === data.length - 1
+        const bh  = Math.max((d.val / max) * barH_max, 3)
+        const x   = startX + i * (barW + gap)
+        const y   = barH_max + 8 - bh           // 8px top padding
+        const cx  = x + barW / 2
         return (
-          <g key={d.label}>
-            <rect x={x} y={y} width={barW} height={barH} rx={5} fill={isLast ? 'url(#barG)' : 'url(#barGF)'}/>
-            {isLast && (
-              <text x={x + barW / 2} y={y - 6} textAnchor="middle" fill="#1D4ED8" fontSize="11" fontWeight="700">{d.val}</text>
+          <g key={`${d.label}-${i}`}>
+            <rect x={x} y={y} width={barW} height={bh} rx={4}
+              fill={isLast ? 'url(#barG)' : 'url(#barGF)'}/>
+            {isLast && d.val > 0 && (
+              <text x={cx} y={y - 5} textAnchor="middle"
+                fill="#1D4ED8" fontSize="9" fontWeight="700">{d.val}</text>
             )}
-            <text x={x + barW / 2} y={chartH + 20} textAnchor="middle" fill="#94A3B8" fontSize="8">{d.label}</text>
+            <text x={cx} y={labelY} textAnchor="middle"
+              fill="#94A3B8" fontSize="7.5">{d.label}</text>
           </g>
         )
       })}
@@ -381,14 +390,31 @@ const NAV_ITEMS: { id: Page; label: string; Icon: () => React.ReactElement }[] =
 ]
 
 // ── DASHBOARD PAGE ─────────────────────────────────────────────────────────────
-function DashboardPage({ sessions, patients, onNavigate }: {
+function DashboardPage({ sessions, patients, dashData, onNavigate }: {
   sessions: SessionRecord[]
   patients: Patient[]
+  dashData: DashboardData | null
   onNavigate: (p: Page) => void
 }) {
-  const totalSessions = patients.reduce((a, p) => a + p.sessionsCount, 0)
-  const inTraining = patients.filter(p => p.inTraining).length
-  const avgScore = Math.round(patients.reduce((a, p) => a + p.score, 0) / patients.length)
+  const stats = dashData?.stats
+  const totalPatients  = stats?.total_patients  ?? patients.length
+  const totalSessions  = stats?.total_sessions  ?? patients.reduce((a, p) => a + p.sessionsCount, 0)
+  const inTraining     = stats?.training_patients ?? patients.filter(p => p.inTraining).length
+  const avgScore       = stats?.avg_health_score  ?? Math.round(patients.reduce((a, p) => a + p.score, 0) / (patients.length || 1))
+  const thisWeek       = stats?.sessions_this_week ?? 0
+
+  const chartData: Array<{ label: string; val: number }> = dashData?.weeklyChart?.length
+    ? dashData.weeklyChart.map(w => ({ label: w.week_label, val: w.session_count }))
+    : CHART_DATA
+
+  const bm = dashData?.brainMetrics
+  const tremorScore    = bm?.tremor_score     ?? 'High'
+  const dopamineAct    = bm?.dopamine_activity ?? 'Low'
+  const motorFunc      = bm?.motor_function    ?? 'Moderate'
+  const cogScore       = bm?.cognitive_score   ?? 'Normal'
+
+  const next: ApiAppointment | null = dashData?.nextAppointment ?? null
+  const nextPatient = next?.patients
 
   return (
     <div className="dashboard">
@@ -399,7 +425,7 @@ function DashboardPage({ sessions, patients, onNavigate }: {
             <IconPatients/>
           </div>
           <div>
-            <p className="stat-value">{patients.length}</p>
+            <p className="stat-value">{totalPatients}</p>
             <p className="stat-label">Total Patients</p>
           </div>
         </div>
@@ -448,22 +474,22 @@ function DashboardPage({ sessions, patients, onNavigate }: {
               <div className="bm-item">
                 <span className="bm-dot" style={{ background: '#EF4444' }}/>
                 <span className="bm-label">Tremor Score</span>
-                <span className="bm-value" style={{ color: '#EF4444' }}>High</span>
+                <span className="bm-value" style={{ color: '#EF4444' }}>{tremorScore}</span>
               </div>
               <div className="bm-item">
                 <span className="bm-dot" style={{ background: '#F59E0B' }}/>
                 <span className="bm-label">Dopamine Activity</span>
-                <span className="bm-value" style={{ color: '#F59E0B' }}>Low</span>
+                <span className="bm-value" style={{ color: '#F59E0B' }}>{dopamineAct}</span>
               </div>
               <div className="bm-item">
                 <span className="bm-dot" style={{ background: '#3B82F6' }}/>
                 <span className="bm-label">Motor Function</span>
-                <span className="bm-value" style={{ color: '#3B82F6' }}>Moderate</span>
+                <span className="bm-value" style={{ color: '#3B82F6' }}>{motorFunc}</span>
               </div>
               <div className="bm-item">
                 <span className="bm-dot" style={{ background: '#10B981' }}/>
                 <span className="bm-label">Cognitive Score</span>
-                <span className="bm-value" style={{ color: '#10B981' }}>Normal</span>
+                <span className="bm-value" style={{ color: '#10B981' }}>{cogScore}</span>
               </div>
             </div>
           </div>
@@ -479,11 +505,10 @@ function DashboardPage({ sessions, patients, onNavigate }: {
               </span>
             </div>
             <div className="chart-summary">
-              <span className="chart-big">{CHART_DATA[CHART_DATA.length - 1].val}</span>
+              <span className="chart-big">{thisWeek}</span>
               <span className="chart-sub">this week</span>
-              <span className="chart-trend">↑ 83%</span>
             </div>
-            <SessionsBarChart/>
+            <SessionsBarChart data={chartData}/>
           </div>
 
           <div className="card">
@@ -518,19 +543,29 @@ function DashboardPage({ sessions, patients, onNavigate }: {
             <div className="card-header">
               <h3 className="card-title">Next Session</h3>
             </div>
-            <div className="upcoming-body">
-              <div className="up-avatar" style={{ background: '#DDD6FE' }}>PL</div>
-              <p className="up-name">Patricia Lim</p>
-              <p className="up-role">Neurology Patient — Stage 1</p>
-              <div className="up-time">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                Today, 2:00 PM
+            {next && nextPatient ? (
+              <div className="upcoming-body">
+                <div className="up-avatar" style={{ background: nextPatient.avatar_color ?? '#DDD6FE' }}>
+                  {nextPatient.initials}
+                </div>
+                <p className="up-name">{nextPatient.full_name}</p>
+                <p className="up-role">Neurology Patient — {stageLabel(nextPatient.stage)}</p>
+                <div className="up-time">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  {new Date(next.scheduled_at).toLocaleString('en-US', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                </div>
+                <button className="btn-primary" onClick={() => onNavigate('analysis')}>
+                  <IconPlay/> Start Analysis
+                </button>
               </div>
-              <button className="btn-primary" onClick={() => onNavigate('analysis')}>
-                <IconPlay/> Start Analysis
-              </button>
-              <button className="btn-ghost">Reschedule</button>
-            </div>
+            ) : (
+              <div className="upcoming-body">
+                <div className="up-empty">No upcoming sessions scheduled.</div>
+                <button className="btn-primary" onClick={() => onNavigate('analysis')}>
+                  <IconPlay/> New Analysis
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="card">
@@ -849,6 +884,78 @@ function PatientsPage({ patients: appPatients, setPatients: setAppPatients }: {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Recent Sessions with pagination ───────────────────────────────────────────
+const SESSION_PAGE = 8
+
+function RecentSessionsList() {
+  const [rows,    setRows]    = useState<SessionRecord[]>([])
+  const [offset,  setOffset]  = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+
+  useEffect(() => {
+    if (!DOCTOR_ID) return
+    setLoading(true)
+    api.sessions.list(DOCTOR_ID, undefined, SESSION_PAGE, 0)
+      .then(list => {
+        setRows(list.map(mapApiSession))
+        setOffset(list.length)
+        setHasMore(list.length === SESSION_PAGE)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const loadMore = async () => {
+    if (loading || !hasMore || !DOCTOR_ID) return
+    setLoading(true)
+    try {
+      const list = await api.sessions.list(DOCTOR_ID, undefined, SESSION_PAGE, offset)
+      setRows(prev => [...prev, ...list.map(mapApiSession)])
+      setOffset(prev => prev + list.length)
+      setHasMore(list.length === SESSION_PAGE)
+    } catch { /* silent */ }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="card-header">
+        <h3 className="card-title">Recent Sessions</h3>
+        {loading && <span className="spinner" style={{ width:14, height:14, borderWidth:2 }}/>}
+      </div>
+      {rows.length === 0 && !loading && (
+        <div style={{ padding:'24px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+          No sessions yet. Run your first analysis above.
+        </div>
+      )}
+      <div className="session-list">
+        {rows.map(s => (
+          <div key={s.id} className="session-item">
+            <div className="s-avatar" style={{ background: s.color }}>{s.initials}</div>
+            <div className="s-info">
+              <p className="s-name">{s.patientName}</p>
+              <p className="s-date">{s.date}</p>
+            </div>
+            <div className={`s-badge ${s.result}`}>
+              {s.result === 'healthy' ? <IconCheck/> : <IconAlert/>}
+              {s.result === 'healthy' ? 'Healthy' : "PD"}
+            </div>
+            <span className="s-conf">{(s.confidence * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+      {hasMore && (
+        <div style={{ padding:'8px 16px 16px' }}>
+          <button className="btn-ghost full-w" onClick={loadMore} disabled={loading}>
+            {loading ? 'Loading…' : 'Load More'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1308,27 +1415,7 @@ function AnalysisPage({ patients, setSessions }: {
                   </>
                 )}
               </div>
-              <div className="info-cards">
-                <div className="info-card">
-                  <div className="info-icon" style={{ background: '#EFF6FF', color: '#3B82F6' }}><IconBrain/></div>
-                  <h4>Voice Biomarkers</h4>
-                  <p>Analyzes MDVP features: jitter, shimmer, HNR, and RPDE from your voice sample.</p>
-                </div>
-                <div className="info-card">
-                  <div className="info-icon" style={{ background: '#F0FDF4', color: '#10B981' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                  </div>
-                  <h4>ML-Powered</h4>
-                  <p>Trained on the UCI Parkinson's dataset with high accuracy across classifiers.</p>
-                </div>
-                <div className="info-card">
-                  <div className="info-icon" style={{ background: '#FEF3C7', color: '#D97706' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                  </div>
-                  <h4>Privacy First</h4>
-                  <p>Audio is processed locally and never stored permanently.</p>
-                </div>
-              </div>
+              <RecentSessionsList/>
             </>
           )}
         </div>
@@ -1690,25 +1777,35 @@ function SettingsPage() {
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
-  const [patients, setPatients] = useState<Patient[]>(INIT_PATIENTS)
+  const [patients, setPatients]   = useState<Patient[]>(INIT_PATIENTS)
   const [sessions, setSessions]   = useState<SessionRecord[]>(INIT_SESSIONS)
+  const [dashData, setDashData]   = useState<DashboardData | null>(null)
 
-  // Load initial data — first page of patients + recent sessions
+  // Load initial data from Supabase via backend
   useEffect(() => {
     if (!DOCTOR_ID) return
 
-    api.patients.list(DOCTOR_ID, 20, 0)
-      .then(res => { if (res.data?.length) setPatients(res.data.map(mapApiPatient)) })
-      .catch(err => console.warn('[patients] API unavailable:', err.message))
-
-    api.sessions.list(DOCTOR_ID)
-      .then(list => { if (list?.length) setSessions(list.map(mapApiSession)) })
-      .catch(err => console.warn('[sessions] API unavailable:', err.message))
+    api.dashboard.get(DOCTOR_ID)
+      .then(d => {
+        setDashData(d)
+        if (d.patients?.length)      setPatients(d.patients.map(mapApiPatient))
+        if (d.recentSessions?.length) setSessions(d.recentSessions.map(mapApiSession))
+      })
+      .catch(err => {
+        console.warn('[dashboard] API unavailable, falling back to local data:', err.message)
+        // fallback: still load patients + sessions separately
+        api.patients.list(DOCTOR_ID, 20, 0)
+          .then(res => { if (res.data?.length) setPatients(res.data.map(mapApiPatient)) })
+          .catch(() => {})
+        api.sessions.list(DOCTOR_ID)
+          .then(list => { if (list?.length) setSessions(list.map(mapApiSession)) })
+          .catch(() => {})
+      })
   }, [])
 
   const renderPage = () => {
     switch (page) {
-      case 'dashboard': return <DashboardPage sessions={sessions} patients={patients} onNavigate={setPage}/>
+      case 'dashboard': return <DashboardPage sessions={sessions} patients={patients} dashData={dashData} onNavigate={setPage}/>
       case 'patients':  return <PatientsPage patients={patients} setPatients={setPatients}/>
       case 'analysis':  return <AnalysisPage patients={patients} setSessions={setSessions}/>
       case 'training':  return <TrainingPage patients={patients}/>

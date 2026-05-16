@@ -182,11 +182,10 @@ export const api = {
 
   // ── Voice Sessions ──────────────────────────────────────────────────────────
   sessions: {
-    list: (doctorId: string, patientId?: string) => {
-      const qs = patientId
-        ? `doctor_id=${doctorId}&patient_id=${patientId}`
-        : `doctor_id=${doctorId}`
-      return request<VoiceSession[]>(`/api/sessions?${qs}`)
+    list: (doctorId: string, patientId?: string, limit = 20, offset = 0) => {
+      const params = new URLSearchParams({ doctor_id: doctorId, limit: String(limit), offset: String(offset) })
+      if (patientId) params.set('patient_id', patientId)
+      return request<VoiceSession[]>(`/api/sessions?${params}`)
     },
 
     weekly: (doctorId: string) =>
