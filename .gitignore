@@ -1,0 +1,7 @@
+/**/node_modules
+*.py
+model
+.env
+.env.local
+database
+__pycache__
